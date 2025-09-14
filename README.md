@@ -29,3 +29,4 @@ https://github.com/atenadadkhah/reader/assets/91287064/c2118870-1755-455c-84d0-d
 4. Open the client side app (client folder) and in `.env.local` check if the server side URL is correct
 5. Run the client side with `npm run dev`
 6. Open the browser and everything should be fine :)
+# Devops_practical_projects
