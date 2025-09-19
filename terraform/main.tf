@@ -1,6 +1,6 @@
 # =================================================================
 # VPC AND NETWORKING CONFIG
-# =========================================================================
+# =================================================================
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -8,7 +8,7 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
 
   tags = {
-    Name = "${local.config["project"]}-vpc"
+    Name = "${var.project}-vpc"
   }
 }
 
@@ -16,49 +16,47 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.config["project"]}-igw"
+    Name = "${var.project}-igw"
   }
 }
 
 # Availability Zones
-
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
 # Public Subnets
-
 resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = data.aws_availability_zones.available.names[0]
+
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${local.config["project"]}-public-a"
+    Name = "${var.project}-public-a"
   }
 }
 
 resource "aws_subnet" "public_b" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.2.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[1]
+  availability_zone        = data.aws_availability_zones.available.names[1]
   map_public_ip_on_launch = true
 
   tags = {
-    Name = "${local.config["project"]}-public-b"
+    Name = "${var.project}-public-b"
   }
 }
 
 # Private Subnets
-
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.3.0/24"
   availability_zone = data.aws_availability_zones.available.names[0]
 
   tags = {
-    Name = "${local.config["project"]}-private-a"
+    Name = "${var.project}-private-a"
   }
 }
 
@@ -66,14 +64,12 @@ resource "aws_subnet" "private_b" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.4.0/24"
   availability_zone = data.aws_availability_zones.available.names[1]
-
   tags = {
-    Name = "${local.config["project"]}-private-b"
+    Name = "${var.project}-private-b"
   }
 }
 
 # Public Route Table
-
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -83,12 +79,11 @@ resource "aws_route_table" "public" {
   }
 
   tags = {
-    Name = "${local.config["project"]}-public-rt"
+    Name = "${var.project}-public-rt"
   }
 }
 
 # Associate Public Subnets
-
 resource "aws_route_table_association" "public_a_assoc" {
   subnet_id      = aws_subnet.public_a.id
   route_table_id = aws_route_table.public.id
@@ -101,28 +96,26 @@ resource "aws_route_table_association" "public_b_assoc" {
 
 # Elastic IP for NAT
 resource "aws_eip" "nat" {
-  vpc = true
+  domain = "vpc"
 
   tags = {
-    Name = "${local.config["project"]}-nat-eip"
+    Name = "${var.project}-nat-eip"
   }
 }
 
-# Single NAT Gateway in Public Subnet A
-
+# NAT Gateway
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public_a.id
 
   tags = {
-    Name = "${local.config["project"]}-nat"
+    Name = "${var.project}-nat"
   }
 
   depends_on = [aws_internet_gateway.igw]
 }
 
-# One Private Route Table (shared by both private subnets)
-
+# Private Route Table
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
@@ -132,12 +125,11 @@ resource "aws_route_table" "private" {
   }
 
   tags = {
-    Name = "${local.config["project"]}-private-rt"
+    Name = "${var.project}-private-rt"
   }
 }
 
-# Associate both private subnets with the single private route table
-
+# Associate Private Subnets
 resource "aws_route_table_association" "private_assoc_a" {
   subnet_id      = aws_subnet.private_a.id
   route_table_id = aws_route_table.private.id
@@ -149,11 +141,11 @@ resource "aws_route_table_association" "private_assoc_b" {
 }
 
 # =================================================================
-# # ALB Security Group
-# =========================================================================
+# SECURITY GROUPS
+# =================================================================
 
 resource "aws_security_group" "alb_sg" {
-  name        = "${local.config["project"]}-alb-sg"
+  name        = "${var.project}-alb-sg"
   description = "Allow HTTP access to ALB"
   vpc_id      = aws_vpc.main.id
 
@@ -165,15 +157,6 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Optional: enable HTTPS later on (commented example)
-  # ingress {
-  #   description = "HTTPS"
-  #   from_port   = 443
-  #   to_port     = 443
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -182,13 +165,12 @@ resource "aws_security_group" "alb_sg" {
   }
 
   tags = {
-    Name = "${local.config["project"]}-alb-sg"
+    Name = "${var.project}-alb-sg"
   }
 }
 
-# EC2 (App) Security Group - allows HTTP from ALB and optionally SSH from your IP
 resource "aws_security_group" "ec2_sg" {
-  name        = "${local.config["project"]}-ec2-sg"
+  name        = "${var.project}-ec2-sg"
   description = "Allow traffic from ALB and SSH"
   vpc_id      = aws_vpc.main.id
 
@@ -200,13 +182,12 @@ resource "aws_security_group" "ec2_sg" {
     security_groups = [aws_security_group.alb_sg.id]
   }
 
-  # OPTIONAL - restrict this in production to your IP (replace with real CIDR)
   ingress {
-    description = "SSH from admin IP (replace before use!)"
+    description = "SSH from admin IP (replace before use)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # <-- change to "x.x.x.x/32"
+    cidr_blocks = ["0.0.0.0/0"] # Replace in production!
   }
 
   egress {
@@ -217,13 +198,12 @@ resource "aws_security_group" "ec2_sg" {
   }
 
   tags = {
-    Name = "${local.config["project"]}-ec2-sg"
+    Name = "${var.project}-ec2-sg"
   }
 }
 
-# RDS Security Group - only allow Postgres from EC2 SG
 resource "aws_security_group" "rds_sg" {
-  name        = "${local.config["project"]}-rds-sg"
+  name        = "${var.project}-rds-sg"
   description = "Allow Postgres access from EC2"
   vpc_id      = aws_vpc.main.id
 
@@ -243,32 +223,28 @@ resource "aws_security_group" "rds_sg" {
   }
 
   tags = {
-    Name = "${local.config["project"]}-rds-sg"
+    Name = "${var.project}-rds-sg"
   }
 }
 
-
 # =================================================================
-# ALB, target group, listener, launch template, ASG
-# =========================================================================
+# LOAD BALANCER + AUTOSCALING
+# =================================================================
 
-# Application Load Balancer
 resource "aws_lb" "app" {
-  name               = "${local.config["project"]}-alb"
+  name               = "${var.project}-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
 
   tags = {
-    Name = "${local.config["project"]}-alb"
+    Name = "${var.project}-alb"
   }
 }
 
-# Target Group - ALB will forward to port 80 (nginx on EC2)
-
 resource "aws_lb_target_group" "app_tg" {
-  name     = "${local.config["project"]}-tg"
+  name     = "${var.project}-tg"
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
@@ -283,11 +259,10 @@ resource "aws_lb_target_group" "app_tg" {
   }
 
   tags = {
-    Name = "${local.config["project"]}-tg"
+    Name = "${var.project}-tg"
   }
 }
 
-# Listener
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
   port              = 80
@@ -299,8 +274,7 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-# IAM Role/Profile for EC2 (for SSM if you want remote manager later)
-
+# IAM Role + Profile for EC2
 data "aws_iam_policy_document" "ec2_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -311,12 +285,21 @@ data "aws_iam_policy_document" "ec2_assume_role" {
   }
 }
 
-resource "aws_iam_role" "ec2_role" {
-  name               = "${local.config["project"]}-ec2-role"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
-  tags = {
-    Name = "${local.config["project"]}-ec2-role"
+# Fetch the latest Amazon Linux 2 AMI
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
+}
+
+
+resource "aws_iam_role" "ec2_role" {
+  name               = "${var.project}-ec2-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 }
 
 resource "aws_iam_role_policy_attachment" "ec2_ssm" {
@@ -325,17 +308,16 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
 }
 
 resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${local.config["project"]}-ec2-profile"
+  name = "${var.project}-ec2-profile"
   role = aws_iam_role.ec2_role.name
 }
 
-# Launch Template - minimal bootstrap so you can SSH and deploy manually
-
+# Launch template for EC2 instances
 resource "aws_launch_template" "app" {
-  name_prefix   = "${local.config["project"]}-lt"
-  image_id      = data.aws_ami.amazon_linux.id
-  instance_type = "t3.micro"
-  key_name      = local.config["key_name"]
+  name_prefix   = "${var.project}-lt"
+  image_id      = data.aws_ami.amazon_linux.id   #  uses lookup, not var.ami_id
+  instance_type = var.instance_type
+  key_name      = var.key_name
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
@@ -345,10 +327,7 @@ resource "aws_launch_template" "app" {
 
   user_data = base64encode(<<-EOF
               #!/bin/bash
-              # Basic bootstrap - update packages (you will still SSH and deploy manually)
               yum update -y
-              
-              # create deploy user for manual SSH if desired
               useradd -m deploy || true
               mkdir -p /home/deploy/.ssh
               chmod 700 /home/deploy/.ssh
@@ -358,35 +337,31 @@ resource "aws_launch_template" "app" {
 
   tag_specifications {
     resource_type = "instance"
-
     tags = {
-      Name = "${local.config["project"]}-ec2"
+      Name = "${var.project}-ec2"
     }
   }
 }
 
-
-# Auto Scaling Group
-
 resource "aws_autoscaling_group" "app" {
-  name                      = "${local.config["project"]}-asg"
+  name                      = "${var.project}-asg"
   min_size                  = 1
   max_size                  = 2
-  desired_capacity          = 1
-  vpc_zone_identifier       = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  desired_capacity          = 2
+  vpc_zone_identifier       = [aws_subnet.public_a.id, aws_subnet.public_b.id]   # use public subnets
   health_check_type         = "ELB"
   health_check_grace_period = 300
 
   launch_template {
-    id      = aws_launch_template.app_lt.id
-    version = aws_launch_template.app_lt.latest_version
+    id      = aws_launch_template.app.id
+    version = aws_launch_template.app.latest_version
   }
 
   target_group_arns = [aws_lb_target_group.app_tg.arn]
 
   tag {
     key                 = "Name"
-    value               = "${local.config["project"]}-ec2"
+    value               = "${var.project}-ec2"
     propagate_at_launch = true
   }
 
@@ -397,44 +372,32 @@ resource "aws_autoscaling_group" "app" {
 
 
 # =================================================================
-#  DB subnet group + RDS Postgres
-# =========================================================================
+# RDS POSTGRES
+# =================================================================
 
-# DB Subnet Group - RDS will use both private subnets
 resource "aws_db_subnet_group" "rds_subnets" {
-  name       = "${local.config["project"]}-rds-subnet-group"
+  name       = "${var.project}-rds-subnet-group"
   subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
 
   tags = {
-    Name = "${local.config["project"]}-rds-subnet-group"
+    Name = "${var.project}-rds-subnet-group"
   }
 }
 
-# RDS PostgreSQL (Multi-AZ)
-
 resource "aws_db_instance" "postgres" {
-  identifier             = "${local.config["project"]}-rds"
-  engine                 = "postgres"
-  engine_version         = "15.3" # adjust if you want different
-  instance_class         = "db.t3.micro"
-  allocated_storage      = 20
-  max_allocated_storage  = 100
-
-  name                   = "backenddb"
-  username               = "appuser"
-  password               = local.config["db_password"]
-
-  db_subnet_group_name   = aws_db_subnet_group.rds_subnets.name
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
-
-  multi_az               = true
-  publicly_accessible    = false
-  skip_final_snapshot    = true
-
-  backup_retention_period = 7
-  deletion_protection     = false
+  identifier              = "${var.project}-db"
+  engine                  = "postgres"
+  engine_version          = "14"       
+  instance_class          = var.db_instance_class
+  allocated_storage       = var.db_allocated_storage
+  username                = var.db_username
+  password                = var.db_password
+  db_subnet_group_name    = aws_db_subnet_group.rds_subnets.name
+  vpc_security_group_ids  = [aws_security_group.rds_sg.id]
+  skip_final_snapshot     = true
+  multi_az                = true
 
   tags = {
-    Name = "${local.config["project"]}-rds"
+    Name = "${var.project}-rds"
   }
 }

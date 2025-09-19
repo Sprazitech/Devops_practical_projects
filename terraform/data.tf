@@ -1,11 +1,14 @@
-data "aws_secretsmanager_secret" "infra_config" {
-  name = "ecommerce-infra-config"
-}
+# # Look up the secret
+# data "aws_secretsmanager_secret" "infra_config" {
+#   name = "ecommerce-secrets"
+# }
 
-data "aws_secretsmanager_secret_version" "infra_config_version" {
-  secret_id = data.aws_secretsmanager_secret.infra_config.id
-}
+# # Get the latest version of the secret
+# data "aws_secretsmanager_secret_version" "infra_config" {
+#   secret_id = data.aws_secretsmanager_secret.infra_config.id
+# }
 
-locals {
-  config = jsondecode(data.aws_secretsmanager_secret_version.infra_config.secret_string)
-}
+# # Parse secret JSON into locals
+# locals {
+#   config = jsondecode(data.aws_secretsmanager_secret_version.infra_config.secret_string)
+# }
