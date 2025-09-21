@@ -182,6 +182,14 @@ resource "aws_security_group" "ec2_sg" {
     security_groups = [aws_security_group.alb_sg.id]
   }
 
+ingress {
+    description     = "HTTP from ALB"
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
   ingress {
     description = "SSH from admin IP (replace before use)"
     from_port   = 22
@@ -250,7 +258,7 @@ resource "aws_lb_target_group" "app_tg" {
   vpc_id   = aws_vpc.main.id
 
   health_check {
-    path                = "/"
+    path                = "/about"
     interval            = 30
     timeout             = 5
     healthy_threshold   = 2
@@ -270,9 +278,40 @@ resource "aws_lb_listener" "http" {
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.app_tg.arn
+     target_group_arn = aws_lb_target_group.app_tg_3000.arn
   }
 }
+
+
+# Target group for port 3000
+resource "aws_lb_target_group" "app_tg_3000" {
+  name     = "${var.project}-tg-3000"
+  port     = 3000
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+
+  health_check {
+    path                = "/about"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    matcher             = "200"
+  }
+}
+
+
+# Listener for port 3000
+# resource "aws_lb_listener" "http_3000" {
+#   load_balancer_arn = aws_lb.app.arn
+#   port              = 3000
+#   protocol          = "HTTP"
+
+#   default_action {
+#     type             = "forward"
+#     target_group_arn = aws_lb_target_group.app_tg_3000.arn
+#   }
+# }
 
 # IAM Role + Profile for EC2
 data "aws_iam_policy_document" "ec2_assume_role" {
@@ -285,16 +324,31 @@ data "aws_iam_policy_document" "ec2_assume_role" {
   }
 }
 
-# Fetch the latest Amazon Linux 2 AMI
-data "aws_ami" "amazon_linux" {
+data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["al2023-ami-*-x86_64*"]
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
   }
 }
+
+
+# # Fetch the latest Amazon Linux 2 AMI
+# data "aws_ami" "amazon_linux" {
+#   most_recent = true
+#   owners      = ["amazon"]
+
+#   filter {
+#     name   = "name"
+#     values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+#   }
+# }
 
 
 resource "aws_iam_role" "ec2_role" {
@@ -315,25 +369,48 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 # Launch template for EC2 instances
 resource "aws_launch_template" "app" {
   name_prefix   = "${var.project}-lt"
-  image_id      = data.aws_ami.amazon_linux.id   #  uses lookup, not var.ami_id
+  image_id      = data.aws_ami.amazon_linux_2023.id #  uses lookup, not var.ami_id
   instance_type = var.instance_type
   key_name      = var.key_name
+
+  network_interfaces {
+  associate_public_ip_address = true
+  security_groups             = [aws_security_group.ec2_sg.id]
+}
+
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
   }
 
-  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  # vpc_security_group_ids = [aws_security_group.ec2_sg.id]
 
-  user_data = base64encode(<<-EOF
+
+   user_data = base64encode(<<-EOF
               #!/bin/bash
-              yum update -y
+              dnf update -y || true
+              dnf install -y nodejs npm git || true
               useradd -m deploy || true
               mkdir -p /home/deploy/.ssh
               chmod 700 /home/deploy/.ssh
               chown -R deploy:deploy /home/deploy/.ssh
+              systemctl enable sshd
+              systemctl start sshd
               EOF
   )
+
+
+
+              # #!/bin/bash
+              # yum update -y
+              # useradd -m deploy || true
+              # mkdir -p /home/deploy/.ssh
+              # chmod 700 /home/deploy/.ssh
+              # chown -R deploy:deploy /home/deploy/.ssh
+              # EOF
+              
+              
+
 
   tag_specifications {
     resource_type = "instance"
@@ -350,14 +427,15 @@ resource "aws_autoscaling_group" "app" {
   desired_capacity          = 2
   vpc_zone_identifier       = [aws_subnet.public_a.id, aws_subnet.public_b.id]   # use public subnets
   health_check_type         = "ELB"
-  health_check_grace_period = 300
+  health_check_grace_period = 600
 
   launch_template {
     id      = aws_launch_template.app.id
     version = aws_launch_template.app.latest_version
   }
 
-  target_group_arns = [aws_lb_target_group.app_tg.arn]
+  target_group_arns = [aws_lb_target_group.app_tg_3000.arn]
+
 
   tag {
     key                 = "Name"
