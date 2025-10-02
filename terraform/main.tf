@@ -190,6 +190,15 @@ ingress {
     security_groups = [aws_security_group.alb_sg.id]
   }
 
+# Allow backend (3001) from ALB
+  ingress {
+    description     = "Backend from ALB"
+    from_port       = 3001
+    to_port         = 3001
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
   ingress {
     description = "SSH from admin IP (replace before use)"
     from_port   = 22
@@ -235,6 +244,8 @@ resource "aws_security_group" "rds_sg" {
   }
 }
 
+
+
 # =================================================================
 # LOAD BALANCER + AUTOSCALING
 # =================================================================
@@ -250,6 +261,110 @@ resource "aws_lb" "app" {
     Name = "${var.project}-alb"
   }
 }
+
+
+# Target group for frontend (3000)
+resource "aws_lb_target_group" "app_tg_3000" {
+  name     = "${var.project}-tg-3000"
+  port     = 3000
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+
+  health_check {
+    path                = "/"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    matcher             = "200-399"
+  }
+
+  tags = {
+    Name = "${var.project}-tg-3000"
+  }
+}
+
+# Target group for backend (3001)
+resource "aws_lb_target_group" "app_tg_3001" {
+  name     = "${var.project}-tg-3001"
+  port     = 3001
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+
+  health_check {
+    path                = "/health"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "${var.project}-tg-3001"
+  }
+}
+
+# Listener on ALB, with path-based routing
+
+# Listener on ALB
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.app.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  # Default → frontend (3000)
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg_3000.arn
+  }
+}
+
+# Rule → send /api/* to backend (3001)
+resource "aws_lb_listener_rule" "backend_rule" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg_3001.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
+  }
+}
+
+# resource "aws_lb_listener" "http" {
+#   load_balancer_arn = aws_lb.app.arn
+#   port              = 80
+#   protocol          = "HTTP"
+
+#   default_action {
+#     type = "forward"
+#     forward {
+#       target_group {
+#         arn = aws_lb_target_group.app_tg_3000.arn
+#         weight = 1
+#       }
+#     }
+#   }
+
+#   dynamic "default_action" {
+#     for_each = []
+#     content {
+#       type = "forward"
+#       forward {
+#         target_group {
+#           arn = aws_lb_target_group.app_tg_3001.arn
+#           weight = 1
+#         }
+#       }
+#     }
+#   }
+# }
 
 # resource "aws_lb_target_group" "app_tg" {
 #   name     = "${var.project}-tg"
@@ -271,34 +386,36 @@ resource "aws_lb" "app" {
 #   }
 # }
 
-resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.app.arn
-  port              = 80
-  protocol          = "HTTP"
+# resource "aws_lb_listener" "http" {
+#   load_balancer_arn = aws_lb.app.arn
+#   port              = 80
+#   protocol          = "HTTP"
 
-  default_action {
-    type             = "forward"
-     target_group_arn = aws_lb_target_group.app_tg_3000.arn
-  }
-}
+#   default_action {
+#     type             = "forward"
+#      target_group_arn = aws_lb_target_group.app_tg_3000.arn
+#   }
+# }
 
 
 # Target group for port 3000
-resource "aws_lb_target_group" "app_tg_3000" {
-  name     = "${var.project}-tg-3000"
-  port     = 3000
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
 
-  health_check {
-    path                = "/health"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    matcher             = "200"
-  }
-}
+
+# resource "aws_lb_target_group" "app_tg_3000" {
+#   name     = "${var.project}-tg-3000"
+#   port     = 3000
+#   protocol = "HTTP"
+#   vpc_id   = aws_vpc.main.id
+
+#   health_check {
+#     path                = "/health"
+#     interval            = 30
+#     timeout             = 5
+#     healthy_threshold   = 2
+#     unhealthy_threshold = 2
+#     matcher             = "200"
+#   }
+# }
 
 
 # Listener for port 3000
@@ -314,29 +431,29 @@ resource "aws_lb_target_group" "app_tg_3000" {
 # }
 
 # IAM Role + Profile for EC2
-data "aws_iam_policy_document" "ec2_assume_role" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["ec2.amazonaws.com"]
-    }
-  }
-}
+# data "aws_iam_policy_document" "ec2_assume_role" {
+#   statement {
+#     actions = ["sts:AssumeRole"]
+#     principals {
+#       type        = "Service"
+#       identifiers = ["ec2.amazonaws.com"]
+#     }
+#   }
+# }
 
-data "aws_ami" "amazon_linux_2023" {
-  most_recent = true
-  owners      = ["amazon"]
+# data "aws_ami" "amazon_linux_2023" {
+#   most_recent = true
+#   owners      = ["amazon"]
 
-  filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64*"]
-  }
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
+#   filter {
+#     name   = "name"
+#     values = ["al2023-ami-*-x86_64*"]
+#   }
+#   filter {
+#     name   = "virtualization-type"
+#     values = ["hvm"]
+#   }
+# }
 
 
 # # Fetch the latest Amazon Linux 2 AMI
@@ -351,6 +468,78 @@ data "aws_ami" "amazon_linux_2023" {
 # }
 
 
+# resource "aws_iam_role" "ec2_role" {
+#   name               = "${var.project}-ec2-role"
+#   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+# }
+
+# resource "aws_iam_role_policy_attachment" "ec2_ssm" {
+#   role       = aws_iam_role.ec2_role.name
+#   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+# }
+
+# resource "aws_iam_instance_profile" "ec2_profile" {
+#   name = "${var.project}-ec2-profile"
+#   role = aws_iam_role.ec2_role.name
+# }
+
+# # Launch template for EC2 instances
+# resource "aws_launch_template" "app" {
+#   name_prefix   = "${var.project}-lt"
+#   image_id      = data.aws_ami.amazon_linux_2023.id #  uses lookup, not var.ami_id
+#   instance_type = var.instance_type
+#   key_name      = var.key_name
+
+#   network_interfaces {
+#   associate_public_ip_address = true
+#   security_groups             = [aws_security_group.ec2_sg.id]
+# }
+
+
+#   iam_instance_profile {
+#     name = aws_iam_instance_profile.ec2_profile.name
+#   }
+
+#  block_device_mappings {
+#     device_name = "/dev/xvda" # default root device for Amazon Linux
+#     ebs {
+#       volume_size = 20       # Increase to 30 GB (or whatever you need)
+#       volume_type = "gp3"    # General Purpose SSD (gp3 is cheaper than gp2)
+#       delete_on_termination = true
+#     }
+#   } 
+
+#Fetch latest Amazon Linux 2023 AMI
+data "aws_ami" "amazon_linux_2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"] # Amazon Linux 2023 (x86_64)
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+
+# IAM assume role policy for EC2
+data "aws_iam_policy_document" "ec2_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+
+# IAM Role for EC2
 resource "aws_iam_role" "ec2_role" {
   name               = "${var.project}-ec2-role"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
@@ -366,21 +555,29 @@ resource "aws_iam_instance_profile" "ec2_profile" {
   role = aws_iam_role.ec2_role.name
 }
 
-# Launch template for EC2 instances
+# Launch Template
 resource "aws_launch_template" "app" {
   name_prefix   = "${var.project}-lt"
-  image_id      = data.aws_ami.amazon_linux_2023.id #  uses lookup, not var.ami_id
+  image_id      = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
   key_name      = var.key_name
 
   network_interfaces {
-  associate_public_ip_address = true
-  security_groups             = [aws_security_group.ec2_sg.id]
-}
-
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.ec2_sg.id]
+  }
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
+  }
+
+  block_device_mappings {
+    device_name = "/dev/xvda" # Default root device
+    ebs {
+      volume_size           = 20      # Increase root volume size (20 GB or higher)
+      volume_type           = "gp3"   # Cost-efficient SSD
+      delete_on_termination = true
+    }
   }
 
   # vpc_security_group_ids = [aws_security_group.ec2_sg.id]
