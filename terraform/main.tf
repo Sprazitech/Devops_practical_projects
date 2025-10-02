@@ -174,13 +174,13 @@ resource "aws_security_group" "ec2_sg" {
   description = "Allow traffic from ALB and SSH"
   vpc_id      = aws_vpc.main.id
 
-  ingress {
-    description     = "HTTP from ALB"
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
+  # ingress {
+  #   description     = "HTTP from ALB"
+  #   from_port       = 80
+  #   to_port         = 80
+  #   protocol        = "tcp"
+  #   security_groups = [aws_security_group.alb_sg.id]
+  # }
 
 ingress {
     description     = "HTTP from ALB"
@@ -251,25 +251,25 @@ resource "aws_lb" "app" {
   }
 }
 
-resource "aws_lb_target_group" "app_tg" {
-  name     = "${var.project}-tg"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
+# resource "aws_lb_target_group" "app_tg" {
+#   name     = "${var.project}-tg"
+#   port     = 80
+#   protocol = "HTTP"
+#   vpc_id   = aws_vpc.main.id
 
-  health_check {
-    path                = "/about"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    matcher             = "200-399"
-  }
+#   health_check {
+#     path                = "/health"
+#     interval            = 30
+#     timeout             = 5
+#     healthy_threshold   = 2
+#     unhealthy_threshold = 2
+#     matcher             = "200-399"
+#   }
 
-  tags = {
-    Name = "${var.project}-tg"
-  }
-}
+#   tags = {
+#     Name = "${var.project}-tg"
+#   }
+# }
 
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
@@ -291,7 +291,7 @@ resource "aws_lb_target_group" "app_tg_3000" {
   vpc_id   = aws_vpc.main.id
 
   health_check {
-    path                = "/about"
+    path                = "/health"
     interval            = 30
     timeout             = 5
     healthy_threshold   = 2
@@ -387,16 +387,54 @@ resource "aws_launch_template" "app" {
 
 
    user_data = base64encode(<<-EOF
-              #!/bin/bash
-              dnf update -y || true
-              dnf install -y nodejs npm git || true
-              useradd -m deploy || true
-              mkdir -p /home/deploy/.ssh
-              chmod 700 /home/deploy/.ssh
-              chown -R deploy:deploy /home/deploy/.ssh
-              systemctl enable sshd
-              systemctl start sshd
-              EOF
+                #!/bin/bash
+                dnf update -y
+                dnf install -y git nodejs npm
+                npm install -g pm2
+
+                # Deploy user
+                useradd -m deploy || true
+
+                # Clone repo (adjust branch + repo)
+                cd /home/deploy
+                git clone https://github.com/Sprazitech/Devops_practical_projects.git app
+                cd app/server
+
+                # Install dependencies
+                npm install
+
+                # Start app on port 3000 with PM2
+                pm2 start npm --name "backend" -- run start:prod
+                pm2 save
+                pm2 startup systemd -u deploy --hp /home/deploy
+                EOF
+   
+
+
+              # #!/bin/bash
+              # dnf update -y
+              # dnf install -y nodejs npm git
+              # cd /home/ec2-user
+              # git clone https://github.com/Sprazitech/Devops_practical_projects.git
+              # cd Devops_practical_projects
+              # npm install
+              # npm run build
+              # # Start app in background
+              # nohup npm start > /home/ec2-user/app.log 2>&1 &
+              # EOF
+
+
+              
+              # #!/bin/bash
+              # sudo dnf update -y || true
+              # sudo dnf install -y nodejs npm git || true
+              # useradd -m deploy || true
+              # mkdir -p /home/deploy/.ssh
+              # chmod 700 /home/deploy/.ssh
+              # chown -R deploy:deploy /home/deploy/.ssh
+              # systemctl enable sshd
+              # systemctl start sshd
+              # EOF
   )
 
 
@@ -425,9 +463,10 @@ resource "aws_autoscaling_group" "app" {
   min_size                  = 1
   max_size                  = 2
   desired_capacity          = 2
+  # vpc_zone_identifier = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   vpc_zone_identifier       = [aws_subnet.public_a.id, aws_subnet.public_b.id]   # use public subnets
   health_check_type         = "ELB"
-  health_check_grace_period = 600
+  health_check_grace_period = 900
 
   launch_template {
     id      = aws_launch_template.app.id
