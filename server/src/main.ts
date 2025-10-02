@@ -11,7 +11,8 @@ async function bootstrap() {
     res.status(200).json({ status: 'ok' });
   });
 
-  await app.listen(3000);
+  await app.listen(3001);
+
 }
 
 bootstrap();
