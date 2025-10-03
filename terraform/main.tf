@@ -140,6 +140,8 @@ resource "aws_route_table_association" "private_assoc_b" {
   route_table_id = aws_route_table.private.id
 }
 
+
+
 # =================================================================
 # SECURITY GROUPS
 # =================================================================
@@ -273,6 +275,7 @@ resource "aws_lb_target_group" "app_tg_3000" {
   health_check {
     path                = "/"
     interval            = 30
+    protocol            = "HTTP"
     timeout             = 5
     healthy_threshold   = 2
     unhealthy_threshold = 2
@@ -294,6 +297,7 @@ resource "aws_lb_target_group" "app_tg_3001" {
   health_check {
     path                = "/api/health"
     interval            = 30
+    protocol            = "HTTP"
     timeout             = 5
     healthy_threshold   = 2
     unhealthy_threshold = 2
@@ -670,7 +674,10 @@ resource "aws_autoscaling_group" "app" {
     version = aws_launch_template.app.latest_version
   }
 
-  target_group_arns = [aws_lb_target_group.app_tg_3000.arn]
+   target_group_arns = [
+    aws_lb_target_group.app_tg_3000.arn,
+    aws_lb_target_group.app_tg_3001.arn,
+  ]
 
 
   tag {
